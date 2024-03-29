@@ -11,6 +11,8 @@ This file contains utility functions for the tiling scripts.
 """
 import numpy as np
 import mrcfile
+import os
+import ast
 
 
 def robust_normalize_batch(batch_images):
@@ -161,3 +163,68 @@ def crop_and_split_array(arr, cube_size,tile_path='../../images/3d_tiles/'):
         np.save(f'{tile_path}chunk_{i}_{chunk["location"]}',chunk['tomo'])
     print(f"Saved all chunks as .npy files in {tile_path}")
 
+
+def recombine_chunks(og_rec_file,chunk_folder,save_path=None):
+    """
+    The following function reads in orignal rec file to create an empty 3D array 
+    then it reads in each of the chunk files and places them in the correct location
+    based on the d,w,h coordinates in the file name. 
+
+    IMPORTANT NOTE: This reconstructs the 3D array to the cropped size of the og_rec_file
+                    you will either need to to pad the output of this function with either
+                    zeros or with the data from the "edges" of og_rec_file_data the got
+                    cropped out when the chunks were created.
+
+    Parameters
+    ----------
+    og_rec_file (str): The path to the original rec file
+    chunk_folder (str): The path to the folder containing the 3d_chunk files
+    save_path (str): The path to save the recombined 3D array. If None, the 
+                        array will not be saved and will be returned instead.
+
+    Returns
+    -------
+    recombined (np.array): The recombined 3D array (if save_path is None)
+    If save_path is None, the recombined 3D array will be returned. 
+    Otherwise, None will be returned, but the recombined 3D array will be saved.
+
+    Example:
+    og_rec_file = './20120923_Hylemonella_10003_full.rec'
+    chunk_folder = '../../images/3d_tiles/'
+    save_path = '../../images/reconstructions/'
+    recombined = recombine_chunks(og_rec_file,chunk_folder,save_path)
+    This will save the recombined 3D array to the
+    ../../images/reconstructions/20120923_Hylemonella_10003_full_RECOMBINED.npy
+
+    """
+
+    # Read in the original rec file to get the shape
+    with mrcfile.open(og_rec_file) as mrc:
+        # Use crop_3d to get the shape of the cropped array
+        shape = crop_3d(mrc.data, (64, 64, 64)).shape
+
+    # Create an empty 3D array
+    recombined = np.zeros(shape)
+    
+    # Get a list of all the chunk files
+    chunk_files = [f for f in os.listdir(chunk_folder) if f.endswith('.npy')]
+
+    # Iterate through each file and place it in the correct location
+    for file in chunk_files:
+        # Get the x,y,z coordinates from the file name
+        d,w,h = ast.literal_eval(file.split('_')[2].split('.npy')[0])
+        d,w,h = int(d),int(w),int(h)
+        # Load the chunk file
+        chunk = np.load(f'{chunk_folder}{file}')
+        # Place the chunk in the correct location
+        cs= chunk.shape
+        recombined[d*cs[0]:(d+1)*cs[0],w*cs[1]:(w+1)*cs[1],h*cs[2]:(h+1)*cs[2]] = chunk
+    
+    # Save the recombined 3D array if save_path is not None
+    if save_path is not None:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        path = os.path.join(save_path,f'{og_rec_file[:-4]}_RECOMBINED.npy')
+        np.save(path,recombined)
+        print(f"Recombined 3D array saved as {path}")
+    else:
+        return recombined
